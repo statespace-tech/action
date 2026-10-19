@@ -1,0 +1,45 @@
+name: Statespace
+description: Record the image of this commit for Statespace. On an exp/ branch, it becomes a version of the branch's arm.
+author: Statespace
+branding:
+  icon: git-pull-request
+  color: purple
+inputs:
+  image:
+    description: The image of this commit, by tag or digest, such as ghcr.io/acme/web@sha256:<digest>.
+    required: true
+  file:
+    description: The path of statespace.toml.
+    default: statespace.toml
+  dry-run:
+    description: Check and print the plan, but record nothing.
+    default: "false"
+outputs:
+  plan:
+    description: What Statespace does with the image.
+    value: ${{ steps.apply.outputs.plan }}
+runs:
+  using: composite
+  steps:
+    - name: Install ssp
+      shell: bash
+      run: |
+        if ! command -v ssp >/dev/null; then
+          curl -fsSL https://statespace.com/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        fi
+    - name: Record the image
+      id: apply
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        FILE: ${{ inputs.file }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        arguments=(apply --json --image "$IMAGE" --file "$FILE")
+        if [ "$DRY_RUN" = "true" ]; then arguments+=(--dry-run); fi
+        result=$(ssp "${arguments[@]}")
+        plan=$(printf '%s' "$result" | jq -r .plan)
+        echo "$plan"
+        echo "plan=$plan" >> "$GITHUB_OUTPUT"
