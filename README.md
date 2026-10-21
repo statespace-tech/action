@@ -5,8 +5,8 @@ This action records the image of the current commit for
 
 - On the default branch, the image becomes a default build. Arms based on its
   commit start once a proxy runs it.
-- On a branch named `exp/<experiment>/<arm>`, the image becomes a version of the
-  arm. The arm runs while GitHub says that the branch's pull request can merge.
+- On a branch named `exp/<name>` or `exp/<experiment>/<arm>`, the image becomes
+  a version of the arm. The arm runs while GitHub says that the branch's pull request can merge.
 - On other branches, nothing is recorded.
 
 The action proves the repository, workflow, and commit with the job's GitHub
@@ -14,7 +14,9 @@ OIDC token. The job needs `id-token: write`. It keeps no Statespace secret.
 
 ## Use
 
-Install the Statespace GitHub App on the repository first: `ssp repo connect`.
+On [statespace.com](https://statespace.com), select **Connect GitHub**, and
+install the Statespace GitHub App on the repository. The App opens a "Set up
+Statespace" pull request that adds this workflow:
 
 ```yaml
 on:
@@ -37,6 +39,7 @@ jobs:
       - uses: docker/build-push-action@v6
         id: build
         with:
+          context: .
           push: true
           tags: ghcr.io/acme/web:${{ github.sha }}
       - uses: statespace-tech/action@v1
@@ -44,7 +47,9 @@ jobs:
           image: ghcr.io/acme/web@${{ steps.build.outputs.digest }}
 ```
 
-Add the same last step to the workflow that builds production.
+Add the same last step to the workflow that builds production. To build images
+another way, such as with ko, Jib, or buildpacks, replace the build step and give
+the image to this action.
 
 ## Inputs
 
