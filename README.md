@@ -1,69 +1,106 @@
 # Statespace action
 
-This action records the image of the current commit for
-[Statespace](https://statespace.com). It runs `ssp apply`:
+This action records the image of the current commit as a build for
+[Statespace](https://statespace.com). A build is a record "commit → image
+digest". When a commit has a build, a person or an agent can add the commit as
+an arm with `ssp arm add <commit> --app <app>`.
 
-- On the default branch, the image becomes a default build. Arms based on its
-  commit start once a proxy runs it.
-- On a branch named `exp/<name>` or `exp/<experiment>/<arm>`, the image becomes
-  a version of the arm. The arm runs while GitHub says that the branch's pull request can merge.
-- On other branches, nothing is recorded.
+The action:
 
-The action proves the repository, workflow, and commit with the job's GitHub
-OIDC token. The job needs `id-token: write`. It keeps no Statespace secret.
+1. Reads `statespace.toml` from the folder `path`.
+2. Gets a GitHub OIDC token for the job. The token proves the repository and
+   the commit. CI keeps no Statespace secret.
+3. Sends the image, the folder, the app (when you give it), and the text of
+   `statespace.toml` to Statespace.
+4. Prints the build that Statespace recorded, and each warning.
+
+Statespace checks `statespace.toml`. When the file has an error, the step
+fails with the message from Statespace.
+
+The action records builds of all branches. A branch name has no meaning to
+Statespace.
 
 ## Use
 
-On [statespace.com](https://statespace.com), select **Connect GitHub**, and
-install the Statespace GitHub App on the repository. The App opens a "Set up
-Statespace" pull request that adds this workflow:
+Before you use the action, do these steps:
+
+1. On [statespace.com](https://statespace.com), install the Statespace GitHub
+   App on the repository.
+2. In the folder of the app's code, run `ssp init`. This command writes
+   `statespace.toml`.
+
+Then add the action after the step that builds and pushes the image. The job
+needs the permission `id-token: write`.
 
 ```yaml
 on:
   push:
-    branches: ["exp/**"]
 permissions:
   contents: read
   packages: write
   id-token: write
 jobs:
-  arm:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         id: build
         with:
-          context: .
+          context: shop
           push: true
-          tags: ghcr.io/acme/web:${{ github.sha }}
+          tags: ghcr.io/acme/shop:${{ github.sha }}
       - uses: statespace-tech/action@v1
         with:
-          image: ghcr.io/acme/web@${{ steps.build.outputs.digest }}
+          image: ghcr.io/acme/shop@${{ steps.build.outputs.digest }}
+          path: shop
 ```
 
-Add the same last step to the workflow that builds production. To build images
-another way, such as with ko, Jib, or buildpacks, replace the build step and give
-the image to this action.
+Build each commit that can become an arm. Also add the action to the workflow
+that builds the image that live runs. Statespace finds the live commit from
+the build of the live image.
+
+You can build images another way, such as with ko, Jib, or buildpacks. Replace
+the build step, and give the image to this action.
+
+## Builds for one app
+
+Several apps can run from one folder, such as `shop-dev` and
+`shop-prod`. When the image is the same for all of these apps, do not set
+`app`. The build is then for all apps of the repository and folder.
+
+When each app has its own image, set `app` on each build:
+
+```yaml
+      - uses: statespace-tech/action@v1
+        with:
+          image: ghcr.io/acme/shop@${{ steps.prod.outputs.digest }}
+          path: shop
+          app: shop-prod
+```
+
+A build with `app` is only for that app. For that app, it has priority over
+a build of the same commit without `app`.
 
 ## Inputs
 
 | Input | Meaning |
 | --- | --- |
-| `image` | The image of this commit, by tag or digest. Required |
-| `file` | The path of `statespace.toml`. The default is `statespace.toml` |
-| `dry-run` | `true` checks and prints the plan, but records nothing |
+| `image` | The image of this commit. Required. Give it by digest, such as `ghcr.io/acme/web@sha256:<digest>`. When you give a tag, the action uses `docker` to find the digest. |
+| `path` | The folder of `statespace.toml`, from the root of the repository. The default is `.`. |
+| `app` | The app that this build is for. Optional. |
+| `api` | The Statespace API. The default is `https://api.statespace.com`. |
 
 ## Outputs
 
 | Output | Meaning |
 | --- | --- |
-| `plan` | What Statespace does with the image |
+| `image` | The image that Statespace recorded, by digest |
 
 ## License
 
