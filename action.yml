@@ -1,45 +1,35 @@
 name: Statespace
-description: Record the image of this commit for Statespace. On an exp/ branch, it becomes a version of the branch's arm.
+description: Record the image of this commit as a Statespace build, so the commit can run as an arm.
 author: Statespace
 branding:
-  icon: git-pull-request
+  icon: git-commit
   color: purple
 inputs:
   image:
-    description: The image of this commit, by tag or digest, such as ghcr.io/acme/web@sha256:<digest>.
+    description: The image of this commit, by digest (such as ghcr.io/acme/web@sha256:<digest>) or by tag. The action resolves a tag to its digest with docker.
     required: true
-  file:
-    description: The path of statespace.toml.
-    default: statespace.toml
-  dry-run:
-    description: Check and print the plan, but record nothing.
-    default: "false"
+  path:
+    description: The folder of statespace.toml, relative to the root of the repository.
+    default: "."
+  app:
+    description: The app that this build is for. Without it, the build is for every app of the repository and folder.
+    default: ""
+  api:
+    description: The Statespace API.
+    default: https://api.statespace.com
 outputs:
-  plan:
-    description: What Statespace does with the image.
-    value: ${{ steps.apply.outputs.plan }}
+  image:
+    description: The image that Statespace recorded, by digest.
+    value: ${{ steps.record.outputs.image }}
 runs:
   using: composite
   steps:
-    - name: Install ssp
-      shell: bash
-      run: |
-        if ! command -v ssp >/dev/null; then
-          curl -fsSL https://statespace.com/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        fi
-    - name: Record the image
-      id: apply
+    - name: Record the build
+      id: record
       shell: bash
       env:
         IMAGE: ${{ inputs.image }}
-        FILE: ${{ inputs.file }}
-        DRY_RUN: ${{ inputs.dry-run }}
-      run: |
-        export PATH="$HOME/.local/bin:$PATH"
-        arguments=(apply --json --image "$IMAGE" --file "$FILE")
-        if [ "$DRY_RUN" = "true" ]; then arguments+=(--dry-run); fi
-        result=$(ssp "${arguments[@]}")
-        plan=$(printf '%s' "$result" | jq -r .plan)
-        echo "$plan"
-        echo "plan=$plan" >> "$GITHUB_OUTPUT"
+        FOLDER: ${{ inputs.path }}
+        APP: ${{ inputs.app }}
+        API: ${{ inputs.api }}
+      run: '"$GITHUB_ACTION_PATH/record.sh"'
