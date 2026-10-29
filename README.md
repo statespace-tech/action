@@ -2,8 +2,13 @@
 
 This action records the image of the current commit as a build for
 [Statespace](https://statespace.com). A build is a record "commit → image
-digest". When a commit has a build, a person or an agent can add the commit as
-an arm with `ssp arm add <commit> --app <app>`.
+digest". When a commit has a build, a person or an agent can make the commit an
+arm of an experiment:
+
+```shell
+ssp experiment update checkout --app shop-prod \
+  --arm c0ffee1=0.05 --arm a1b2c3d=0.05
+```
 
 The action:
 
@@ -26,8 +31,10 @@ Before you use the action, do these steps:
 
 1. On [statespace.com](https://statespace.com), install the Statespace GitHub
    App on the repository.
-2. In the folder of the app's code, run `ssp init`. This command writes
-   `statespace.toml`.
+2. In the folder of the app's code, write `statespace.toml`. Start from the
+   starter file in the docs:
+   <https://docs.statespace.com/reference/statespace-toml#starter-file>.
+   A coding agent can write it.
 
 Then add the action after the step that builds and pushes the image. The job
 needs the permission `id-token: write`.
