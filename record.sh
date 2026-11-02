@@ -90,7 +90,9 @@ if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
 fi
 
 jq -r '.warnings[]? | "::warning title=Statespace::\(.)"' "$response"
-line=$(jq -r '"Recorded the build \(.commit[0:12]) → \(.image) for \(.repo), folder \(.path), "
+where="folder $folder"
+if [ "$folder" = . ]; then where="the root"; fi
+line=$(jq -r --arg where "$where" '"Recorded the build \(.commit[0:12]) → \(.image) for \(.repo), \($where), "
   + (if .app then "app \(.app)" else "every app of the folder" end)' "$response")
 echo "$line"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
