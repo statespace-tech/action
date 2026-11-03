@@ -1,13 +1,16 @@
 name: Statespace
-description: Record the image of this commit as a Statespace build, so the commit can run as an arm.
+description: Record the image or the files of this commit as a Statespace build, so the commit can run as an arm.
 author: Statespace
 branding:
   icon: git-commit
   color: purple
 inputs:
   image:
-    description: The image of this commit, by digest (such as ghcr.io/acme/web@sha256:<digest>) or by tag. The action resolves a tag to its digest with docker.
-    required: true
+    description: The image of this commit, by digest (such as ghcr.io/acme/web@sha256:<digest>) or by tag. The action resolves a tag to its digest with docker. Give image or files.
+    default: ""
+  files:
+    description: The location of the files of this commit, such as s3://acme-site/builds/<commit>/ or gs://acme-site/builds/<commit>/. It ends with /. Give image or files.
+    default: ""
   path:
     description: The folder of statespace.toml, relative to the root of the repository.
     default: "."
@@ -21,6 +24,12 @@ outputs:
   image:
     description: The image that Statespace recorded, by digest.
     value: ${{ steps.record.outputs.image }}
+  files:
+    description: The location of the files that Statespace recorded.
+    value: ${{ steps.record.outputs.files }}
+  hash:
+    description: The files hash of the files that Statespace recorded, such as sha256:<hex>.
+    value: ${{ steps.record.outputs.hash }}
 runs:
   using: composite
   steps:
@@ -29,6 +38,7 @@ runs:
       shell: bash
       env:
         IMAGE: ${{ inputs.image }}
+        FILES: ${{ inputs.files }}
         FOLDER: ${{ inputs.path }}
         APP: ${{ inputs.app }}
         API: ${{ inputs.api }}

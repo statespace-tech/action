@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Record the image of this commit as a Statespace build.
+# Record the image or the files of this commit as a Statespace build.
 #
-# Input (environment): IMAGE, FOLDER, APP, API.
-# Output: the step output `image` (the recorded image, by digest).
+# Input (environment): IMAGE or FILES, FOLDER, APP, API.
+# Output: the step outputs `image` (the recorded image, by digest), or
+# `files` (the location) and `hash` (the files hash).
 set -euo pipefail
+
+# shellcheck source=SCRIPTDIR/files.sh
+. "$(dirname "${BASH_SOURCE[0]}")/files.sh"
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
 
 fail() {
   echo "::error title=Statespace::$1"
@@ -25,9 +32,18 @@ if [ ! -f "$config_file" ]; then
   fail "$config_file does not exist. Check out the repository before this step, and set path to the folder of statespace.toml"
 fi
 
+# The build is an image or files. Exactly one of the two inputs is set.
+image=${IMAGE:-}
+files=${FILES:-}
+if [ -n "$image" ] && [ -n "$files" ]; then
+  fail "give image or files, not both"
+fi
+if [ -z "$image" ] && [ -z "$files" ]; then
+  fail "give image (such as ghcr.io/acme/web@sha256:<digest>) or files (such as s3://acme-site/builds/<commit>/)"
+fi
+
 # The image by digest. A tag is resolved with docker. A digest is checked in
 # the registry.
-image=${IMAGE:?the input image is required}
 check_digest() {
   if ! command -v docker >/dev/null; then
     echo "::warning title=Statespace::docker is not installed, so the action did not check that $image exists"
@@ -70,7 +86,42 @@ resolve_image() {
   image=$digest
 }
 
-resolve_image
+# The files: download every object under the location, and compute the
+# files hash.
+hash_files() {
+  if ! valid_location "$files"; then
+    fail "files must be s3://<bucket>/<prefix>/ or gs://<bucket>/<prefix>/, and end with /. It is $files"
+  fi
+  local dir=$work/files
+  mkdir -p "$dir"
+  case "$files" in
+    s3://*)
+      command -v aws >/dev/null || fail "install the AWS CLI to read $files"
+      aws s3 cp --recursive --only-show-errors "$files" "$dir" >&2 ||
+        fail "could not read $files. Give the job read access to this location"
+      ;;
+    gs://*)
+      command -v gcloud >/dev/null || fail "install the Google Cloud CLI to read $files"
+      gcloud storage rsync --recursive --no-user-output-enabled "$files" "$dir" >&2 ||
+        fail "could not read $files. Give the job read access to this location"
+      ;;
+  esac
+  if [ -z "$(find "$dir" -type f -print -quit)" ]; then
+    fail "no files at $files. Upload the build to this location before this step"
+  fi
+  hash=$(files_hash "$dir") || fail "could not compute the hash of the files at $files"
+}
+
+if [ -n "$image" ]; then
+  resolve_image
+  build=$(jq -n --arg image "$image" '{image: $image}')
+  recorded=$image
+else
+  hash_files
+  build=$(jq -n --arg location "$files" --arg hash "$hash" \
+    '{files: {location: $location, hash: $hash}}')
+  recorded="$files ($hash)"
+fi
 
 # The job's OIDC token proves the repository and the commit.
 if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
@@ -86,15 +137,14 @@ if [ -z "$token" ]; then fail "could not get the job's OIDC token"; fi
 echo "::add-mask::$token"
 
 body=$(jq -n \
-  --arg image "$image" \
+  --argjson build "$build" \
   --arg path "$folder" \
   --arg app "${APP:-}" \
   --rawfile config "$config_file" \
-  '{image: $image, path: $path, config: $config}
+  '$build + {path: $path, config: $config}
    + (if $app == "" then {} else {app: $app} end)')
 
-response=$(mktemp)
-trap 'rm -f "$response"' EXIT
+response=$work/response
 status=$(curl -sS -o "$response" -w '%{http_code}' \
   -X POST "${API%/}/v1/ci/builds" \
   -H "Authorization: Bearer $token" \
@@ -109,10 +159,14 @@ fi
 jq -r '.warnings[]? | "::warning title=Statespace::\(.)"' "$response"
 where="folder $folder"
 if [ "$folder" = . ]; then where="the root"; fi
-line=$(jq -r --arg where "$where" '"Recorded the build \(.commit[0:12]) → \(.image) for \(.repo), \($where), "
+line=$(jq -r --arg where "$where" --arg recorded "$recorded" '"Recorded the build \(.commit[0:12]) → \($recorded) for \(.repo), \($where), "
   + (if .app then "app \(.app)" else "every app of the folder" end)' "$response")
 echo "$line"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   echo "**Statespace**: $line" >>"$GITHUB_STEP_SUMMARY"
 fi
-echo "image=$image" >>"$GITHUB_OUTPUT"
+{
+  echo "image=$image"
+  echo "files=$files"
+  echo "hash=${hash:-}"
+} >>"$GITHUB_OUTPUT"
