@@ -25,11 +25,28 @@ if [ ! -f "$config_file" ]; then
   fail "$config_file does not exist. Check out the repository before this step, and set path to the folder of statespace.toml"
 fi
 
-# The image by digest. A tag is resolved with docker.
+# The image by digest. A tag is resolved with docker. A digest is checked in
+# the registry.
 image=${IMAGE:?the input image is required}
+check_digest() {
+  if ! command -v docker >/dev/null; then
+    echo "::warning title=Statespace::docker is not installed, so the action did not check that $image exists"
+    return
+  fi
+  local output
+  if output=$(docker manifest inspect "$image" 2>&1 >/dev/null); then
+    return
+  fi
+  if grep -qiE 'no such manifest|manifest unknown|not found' <<<"$output"; then
+    fail "$image does not exist. Give the repository that the build step pushed to"
+  fi
+  fail "could not find $image in the registry: $(head -n 1 <<<"$output"). Give the repository that the build step pushed to, and log in to the registry before this step"
+}
+
 resolve_image() {
   if [[ "$image" == *@* ]]; then
     if [[ "$image" =~ ^[a-z0-9._/:-]+@sha256:[0-9a-f]{64}$ ]]; then
+      check_digest
       return
     fi
     fail "$image is not a repository and a sha256 digest, such as ghcr.io/acme/web@sha256:<digest>"
